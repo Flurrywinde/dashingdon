@@ -1,0 +1,64 @@
+.holder{
+	width: 760px;
+	margin: 10px auto;
+	padding: 10px 0;
+	background: white;
+	border: 2px solid #DBDBDB;
+	-webkit-border-radius: 5px;
+	-moz-border-radius: 5px;
+	border-radius: 5px;
+	text-align: center;
+	overflow: hidden;
+}
+
+.upload input{
+	display: none;
+}
+
+.pure-button{
+	margin: 5px 0;
+}
+.upload{
+}
+/*
+img{
+	width: 100%;
+	height: auto;
+	overflow: hidden;
+}
+*/
+.status{
+	display: none;
+	padding: 5px;
+	background: #F47063;
+	width: 100%;
+	color: white;
+	margin: 8px 0;
+}
+
+.progress {
+	position: relative;
+	width: 90%;
+	margin: 10px auto;
+	border: 1px solid #DDD;
+	padding: 5px;
+	border-radius: 3px;
+	height: 40px;
+}
+.bar{
+	background: #008DE6;
+	height: 20px;
+	width: 0%;
+	/* transition animation */
+	-webkit-transition: width .3s;
+		-moz-transition: width .3s;
+			transition: width .3s;
+
+}
+.percent {
+	position: absolute;
+	display: inline-block;
+	top: 6px;
+	left: 48%;
+	color: #333;
+}

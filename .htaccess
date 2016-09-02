@@ -1,0 +1,8 @@
+RewriteEngine On
+RewriteCond %{HTTPS} !=on
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+<FilesMatch "\.(htm|html)$">
+  ExpiresActive On
+  ExpiresDefault A1
+  Header append Cache-Control must-revalidate
+</FilesMatch>
