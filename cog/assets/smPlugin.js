@@ -45,7 +45,6 @@ Scene.validCommands.sm_load = 1;
 Scene.validCommands.sm_save = 1;
 Scene.validCommands.sm_delete = 1;
 Scene.validCommands.sm_init = 1;
-Scene.validCommands.whatever = 1;
 
 (function(){
  "use strict";
@@ -334,11 +333,13 @@ Scene.prototype.resetPage = function resetPage() {
         saveMod.c_password = password; //Stores password but doesn't "save it".
     } 
     var self = this;
-    this.save(function() {
-      self.prevLineEmpty = true;
+    clearScreen(function() {
+      // save in the background, eventually
+      self.save("");
+      self.prevLine = "empty";
       self.screenEmpty = true;
-      clearScreen(function() {self.execute();});
-    }, "");
+      self.execute();
+    });
 }
 
 function str_to_boolean(string) {

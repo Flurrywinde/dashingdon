@@ -17,13 +17,58 @@
  * either express or implied.
  */
 
+_global = this;
+
+(function() {
+  var userAgent, url, protocol;
+  if (typeof window !== "undefined") {
+    userAgent = navigator.userAgent;
+    url = window.location.href;
+    protocol = window.location.protocol;
+  }
+  _global.isWebOS = /webOS/.test(userAgent);
+  _global.isMobile = _global.isWebOS || /Mobile/.test(userAgent);
+  _global.isFile = /^file:/.test(url);
+  _global.isXul = /^chrome:/.test(url);
+  _global.isWinOldApp = false;
+  try {
+    isWinOldApp = window.external.IsWinOldApp();
+  } catch (ignored) {}
+  _global.isWeb = !_global.isWinOldApp && /^https?:/.test(url);
+  _global.isAndroid = /Android/.test(userAgent);
+  _global.isSecureWeb = /^https:?$/.test(protocol);
+  _global.isSafari = /Safari/.test(userAgent);
+  _global.isIE = /(MSIE|Trident)/.test(userAgent);
+  _global.isIPad = /iPad/.test(userAgent);
+  _global.isKindleFire = /Kindle Fire/.test(userAgent);
+  _global.isWinStoreApp = "ms-appx:" == protocol;
+  _global.isCef = !!_global.cefQuery;
+  _global.isNode = typeof process !== "undefined";
+})();
+
+_global.loadTime = new Date().getTime();
+
+function callIos(scheme, path) {
+  if (!_global.isIosApp) return;
+  if (path) {
+    path = encodeURIComponent(path);
+  } else {
+    path = "";
+  }
+  setTimeout(function() {
+    var iframe = document.createElement("IFRAME");
+    iframe.setAttribute("src", scheme + "://" + path);
+    iframe.setAttribute("style", "display:none");
+    document.documentElement.appendChild(iframe);
+    iframe.parentNode.removeChild(iframe);
+    iframe = null;
+  }, 0);
+}
+
 function safeCall(obj, fn) {
     if (!fn) return;
     var isHeadless = typeof window == "undefined";
     var debug = false || (!isHeadless && window.debug);
-    var userAgent = this.window && window.navigator && window.navigator.userAgent;
-    var isSafari = /Safari/.test(userAgent);
-    var isIE = /MSIE/.test(userAgent);
     if (isIE || isHeadless) {
         // just call through; onerror will be called and debugger will handle it
         if (typeof MSApp != "undefined") {
@@ -307,6 +352,7 @@ function recordDirtySlots(slots, callback) {
 
 function recordEmail(email, callback) {
   if (initStore()) {
+    window.recordedEmail = email;
     window.store.set("email", email, safeCallback(callback));
   } else {
     safeTimeout(callback, 0);
@@ -318,15 +364,27 @@ function fetchEmail(callback) {
     safeTimeout(function(){callback("");}, 0);
     return;
   }
+  // For some reason, this get seems to not respond sometimes
+  // adding a fallback timeout
   window.store.get("email", function(ok, value) {
     safeCall(null, function() {
+      if (ok) window.recordedEmail = value;
+      if (!callback) return;
+      var temp = callback;
+      callback = null;
       if (ok && value) {
-        callback(value);
+        temp(value);
       } else {
-        callback("");
+        temp("");
       }
     });
   });
+  safeTimeout(function() {
+    if (!callback) return;
+    var temp = callback;
+    callback = null;
+    temp("");
+  }, 1000);
 }
 
 function restoreObject(store, key, defaultValue, callback) {
@@ -389,8 +447,10 @@ function fetchSavesFromSlotList(store, slotList, i, saveList, callback) {
     return safeCall(null, function() {callback(saveList);});
   }
   restoreObject(store, "state"+slotList[i], null, function(saveState) {
-    saveState.timestamp = slotList[i].substring(4/*"save".length*/);
-    saveList.push(saveState);
+    if (saveState) {
+      saveState.timestamp = slotList[i].substring(4/*"save".length*/);
+      saveList.push(saveState);
+    }
     fetchSavesFromSlotList(store, slotList, i+1, saveList, callback);
   });
 }
@@ -651,7 +711,7 @@ function isStateValid(state) {
 }
 
 function restartGame(shouldPrompt) {
-  if (window.tickerRunning) {
+  if (window.blockRestart) {
     asyncAlert("Please wait until the timer has run out.");
     return;
   }
@@ -675,6 +735,12 @@ function restoreGame(state, forcedScene, userRestored) {
     var scene;
     var secondaryMode = null;
     var saveSlot = "";
+    var forcedSceneLabel = null;
+    if (/\|/.test(forcedScene)) {
+      var parts = forcedScene.split("|");
+      forcedScene = parts[0];
+      forcedSceneLabel = parts[1];
+    }
     if (forcedScene == "choicescript_stats") {
       secondaryMode = "stats";
       saveSlot = "temp";
@@ -685,7 +751,6 @@ function restoreGame(state, forcedScene, userRestored) {
     if (!isStateValid(state)) {
         var startupScene = forcedScene ? forcedScene : window.nav.getStartupScene();
         scene = new Scene(startupScene, window.stats, window.nav, {debugMode:window.debug, secondaryMode:secondaryMode, saveSlot:saveSlot});
-        safeCall(scene, scene.execute);
     } else {
       if (forcedScene) state.stats.sceneName = forcedScene;
       window.stats = state.stats;
@@ -699,8 +764,11 @@ function restoreGame(state, forcedScene, userRestored) {
       if (userRestored) {
         scene.temps.choice_user_restored = true;
       }
-      safeCall(scene, scene.execute);
     }
+    if (forcedSceneLabel !== null) {
+      scene.targetLabel = {label:forcedSceneLabel, origin:"url", originLine:0}
+    }
+    safeCall(scene, scene.execute);
 }
 
 function redirectScene(sceneName, label, originLine) {
@@ -709,41 +777,11 @@ function redirectScene(sceneName, label, originLine) {
   clearScreen(function() {scene.execute();});
 }
 
-function loadTempStats(defaultValue, callback) {
-  function valueLoaded(ok, value) {
-    var state = {};
-    if (ok && value && String(value)) {
-      try {
-        state = jsonParse(value);
-      } catch (e) {}
-    }
-    if (state && state.stats) {
-      callback(state.stats);
-    } else {
-      callback(defaultValue);
-    }
-  }
-  if (!initStore()) {
-    if (window.pseudoSave && window.pseudoSave["temp"]) {
-      return safeTimeout(function() {
-        valueLoaded("ok", pseudoSave["temp"]);
-      }, 0);
-    } else {
-      return safeTimeout(function() {callback(defaultValue);}, 0);
-    }
-  } else {
-    window.store.get("statetemp", valueLoaded);
-  }
-}
+tempStatWrites = {};
 
-function clearTemp(callback) {
-  if (!initStore()) {
-    if (window.pseudoSave) {
-      delete window.pseudoSave.temp;
-    }
-    return safeTimeout(callback, 0);
-  }
-  window.store.remove("statetemp", callback);
+function transferTempStatWrites() {
+  if (!_global.isIosApp) return;
+  callIos("transferwrites", JSON.stringify(tempStatWrites));
 }
 
 function getCookieByName(cookieName, ck) {
@@ -884,4 +922,20 @@ function cefQuerySimple(method) {
     onSuccess: function(response) {console.log(method + " success");},
     onFailure: function(error_code, error_message) {console.error(method + " error: " + error_message);}
   });
+}
+
+shortMonthStrings = [null, "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/parse
+// "Given a date string of "March 7, 2014", parse() assumes a local time zone, but given an
+// ISO format such as "2014-03-07" it will assume a time zone of UTC for ES5 or local for
+// ECMAScript 2015."
+function parseDateStringInCurrentTimezone(YYYY_MM_DD, line) {
+  var result = /^(\d{4})-(\d{2})-(\d{2})$/.exec(YYYY_MM_DD);
+  if (!result) throw new Error("line "+line+": invalid date string " + YYYY_MM_DD);
+  var fullYear = result[1];
+  var oneBasedMonthNumber = parseInt(result[2],10);
+  var dayOfMonth = parseInt(result[3],10);
+  var shortMonthString = shortMonthStrings[oneBasedMonthNumber];
+  return new Date(shortMonthString + " " + dayOfMonth + ", " + fullYear);
 }

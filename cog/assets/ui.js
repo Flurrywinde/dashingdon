@@ -54,11 +54,12 @@ function println(msg, parent) {
 
 function showStats() {
     if (document.getElementById('loading')) return;
-    setButtonTitles();
-    if (window.stats.scene.secondaryMode == "stats") {
-      clearScreen(loadAndRestoreGame);
-      return;
+    var button = document.getElementById("statsButton");
+    if (button && button.innerHTML == "Return to the Game") {
+      setButtonTitles();
+      return clearScreen(loadAndRestoreGame);
     }
+    setButtonTitles();
     var currentScene = window.stats.scene;
     var scene = new Scene("choicescript_stats", window.stats, this.nav, {secondaryMode:"stats", saveSlot:"temp"});
     main.innerHTML = "<div id='text'></div>";
@@ -274,23 +275,6 @@ function printAchievements(target) {
   }
 
   target.innerHTML = buffer.join("");
-}
-
-function callIos(scheme, path) {
-  if (!window.isIosApp) return;
-  if (path) {
-    path = encodeURIComponent(path);
-  } else {
-    path = "";
-  }
-  setTimeout(function() {
-    var iframe = document.createElement("IFRAME");
-    iframe.setAttribute("src", scheme + "://" + path);
-    iframe.setAttribute("style", "display:none");
-    document.documentElement.appendChild(iframe);
-    iframe.parentNode.removeChild(iframe);
-    iframe = null;
-  }, 0);
 }
 
 // in the iOS app, display a page curl animation
@@ -580,9 +564,10 @@ function printOptionRadioButton(div, name, option, localChoiceNumber, globalChoi
     div.appendChild(div2);
 }
 
-function printImage(source, alignment) {
+function printImage(source, alignment, alt) {
   var img = document.createElement("img");
   img.src = source;
+  if (alt !== null && String(alt).length > 0) img.setAttribute("alt", alt);
   setClass(img, "align"+alignment);
   document.getElementById("text").appendChild(img);
 }
@@ -597,6 +582,19 @@ function playSound(source) {
     document.body.appendChild(audio);
     audio.play();
   }
+}
+
+function printYoutubeFrame(slug) {
+  var wrapper = document.createElement("div");
+  setClass(wrapper, "videoWrapper");
+  var iframe = document.createElement("iframe");
+  iframe.width="560";
+  iframe.height="315";
+  iframe.src="https://www.youtube.com/embed/"+slug;
+  iframe.setAttribute("frameborder", 0);
+  iframe.setAttribute("allowfullscreen", true);
+  wrapper.appendChild(iframe);
+  document.getElementById("text").appendChild(wrapper);
 }
 
 function moreGames() {
@@ -751,6 +749,10 @@ function shareAction(e) {
   });
 }
 
+function isReviewSupported() {
+  return !!(window.isIosApp || window.isAndroidApp);
+}
+
 function isFollowEnabled() {
   if (!window.isWeb) return false;
   if ("localhost" != window.location.hostname && !/\.?choiceofgames\.com$/.test(window.location.hostname)) return false;
@@ -776,33 +778,38 @@ function printFollowButtons() {
 
 function subscribeLink(e) {
   clearScreen(function() {
-    subscribe(document.getElementById('text'), "now", function() {
+    subscribe(document.getElementById('text'), {now:1}, function() {
       clearScreen(loadAndRestoreGame);
     });
   });
 }
 
-function subscribeByMail(target, now, callback, code) {
-  if (now) {
+function subscribeByMail(target, options, callback, code) {
+  if (options.now) {
     code();
-    safeTimeout(function() {callback(now);}, 0);
+    if (options.allowContinue) safeTimeout(function() {callback("now");}, 0);
   } else {
-    println("Click here to subscribe to our mailing list; we'll notify you when our next game is ready!");
+    println("Click here to subscribe to our mailing list; " + options.message);
     println("");
     printButton("Subscribe", target, false, function() {
         code();
       });
-    printButton("Next", target, false, function() {
-      safeTimeout(function() {callback(now);}, 0);
-    });
-    printFooter();
+    if (options.allowContinue) {
+      printButton("No, Thanks", target, false, function() {
+        safeTimeout(function() {callback();}, 0);
+      });
+    }
+    // why is this timeout necessary?
+    safeTimeout(function() {printFooter();}, 0);
   }
 }
 
-function subscribe(target, now, callback) {
+function subscribe(target, options, callback) {
+  if (!options.message) options.message = "we'll notify you when our next game is ready!";
+  if (typeof options.allowContinue === "undefined") options.allowContinue = 1;
   if (!target) target = document.getElementById('text');
   if (window.isIosApp) {
-    subscribeByMail(target, now, callback, function() {
+    subscribeByMail(target, options, callback, function() {
       callIos("subscribe");
     });
     return;
@@ -810,15 +817,15 @@ function subscribe(target, now, callback) {
   var mailToSupported = isMobile && !window.isMacApp;
   if (window.isAndroidApp) mailToSupported = urlSupport.isSupported("mailto:support@choiceofgames.com");
   if (mailToSupported) {
-    subscribeByMail(target, now, callback, function() {
+    subscribeByMail(target, options, callback, function() {
       window.location.href = "mailto:subscribe-"+window.storeName+"-"+platformCode() + "@choiceofgames.com?subject=Sign me up&body=Please notify me when the next game is ready.";
     });
     return;
   }
-  println("Type your email address below; we'll notify you when our next game is ready!");
+  println("Type your email address below; " + options.message);
   println("");
   fetchEmail(function(defaultEmail) {
-    promptEmailAddress(target, defaultEmail, function(cancel, email) {
+    promptEmailAddress(target, defaultEmail, options.allowContinue, function(cancel, email) {
       if (cancel) {
         return safeCall(null, callback);
       }
@@ -840,9 +847,11 @@ function subscribe(target, now, callback) {
             target = document.getElementById('text');
             println(response.msg, target);
             println("", target);
-            printButton("Next", target, false, function() {
-              safeCall(null, callback);
-            });
+            if (options.allowContinue) {
+              printButton("Next", target, false, function() {
+                safeCall(null, callback);
+              });
+            }
           });
         }
       };
@@ -910,6 +919,64 @@ function subscribe(target, now, callback) {
   });
 }
 
+function downloadLink(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  if (window.releaseDate && new Date() < window.releaseDate) {
+    return asyncAlert("You'll need to wait until after the game is released on " + window.releaseDate);
+  }
+  clearScreen(function() {
+    var text = document.getElementById("text");
+    if (window.knownPurchases && window.knownPurchases.adfree) {
+      println("You can download the game using the links below.");
+      println("");
+      var files = {
+        Windows: window.downloadName + " Setup " + window.downloadVersion + "-ia32.exe",
+        Mac: window.downloadName + "-" + window.downloadVersion + ".dmg",
+        Linux: window.downloadPackage + "-" + window.downloadVersion + "-ia32.deb"
+      }
+      var detectedOs;
+      if (/Windows/.test(navigator.userAgent)) {
+        detectedOs = "Windows";
+      } else if (/Mac OS X/.test(navigator.userAgent)) {
+        detectedOs = "Mac";
+      } else if (/Linux/.test(navigator.userAgent)) {
+        detectedOs = "Linux";
+      }
+      if (detectedOs) {
+        printDownloadLink(detectedOs);
+      }
+      for (var os in files) {
+        if (detectedOs != os) printDownloadLink(os);
+      }
+      function printDownloadLink(os) {
+        var link = document.createElement("a");
+        if (detectedOs == os) {
+          setClass(link, "next linkButton");
+        } else {
+          link.style.display = "block";
+        }
+        link.innerHTML = "Download for " + os;
+        link.href = "scenes/"+files[os];
+        text.appendChild(link);
+      }
+      println("");
+      printButton("Next", text, false, function() {
+        safeCall(null, function() { clearScreen(loadAndRestoreGame); });
+      });
+    } else {
+      println("To download this game for Windows, Mac, or Linux, you'll need to purchase it first.");
+      println("");
+      printOptions([""], [{name:"Purchase it now.", purchase:1}, {name:"No, thanks.", cancel:1}], function(option) {
+        if (option.purchase) {
+          purchase("adfree", downloadLink);
+        } else {
+          safeCall(null, function() { clearScreen(loadAndRestoreGame); });
+        }
+      });
+    }
+  });
+}
+
 function cacheKnownPurchases(knownPurchases) {
   if (!knownPurchases) return;
   var output = {billingSupported:true};
@@ -919,55 +986,98 @@ function cacheKnownPurchases(knownPurchases) {
     output[parts[1]] = true;
   }
   window.knownPurchases = output;
-}
-
-function getKnownPurchases(callback) {
-  isRegistered(function(registered){
-    if (registered) {
-      startLoading();
-      xhrAuthRequest("GET", "get-purchases", function(ok, response) {
-        doneLoading();
-        if (ok) {
-          cacheKnownPurchases(response);
-        } else {
-          if (response.error != "not registered") {
-            alertify.error("There was an error downloading your purchases from Choiceofgames.com. "+
-              "Please refresh this page to try again, or contact support@choiceofgames.com for assistance.", 15000);
-          }
-        }
-        callback(ok, window.knownPurchases);
-      });
-    } else {
-      callback("ok", {billingSupported: true});
-    }
-  });
+  fetchEmail(function(email) {
+    if (email) window.store.set("knownPurchases"+email.replace(/[^A-z0-9]/g, "_"), JSON.stringify(window.knownPurchases));
+  })
+  if (window.isIosApp) {
+    callIos("updateadfree", output.adfree);
+  } else if (window.isAndroidApp) {
+    androidBilling.updateAdfree(!!output.adfree);
+  }
 }
 
 // Callback expects a map from product ids to booleans
 function checkPurchase(products, callback) {
+  function publishPurchaseEvents(purchases) {
+    if (window.purchaseSubscriptions) {
+      for (var key in purchaseSubscriptions) {
+        if (purchases[key]) purchaseSubscriptions[key].call();
+      }
+    }
+  }
+
+  function checkWebPurchases(callback) {
+    isRegistered(function (registered) {
+      if (!registered) return callback("ok", {billingSupported: true});
+      if (window.knownPurchases) {
+        safeTimeout(function() {
+          callback("ok", window.knownPurchases);
+          publishPurchaseEvents(knownPurchases);
+        }, 0);
+      } else {
+        startLoading();
+        xhrAuthRequest("GET", "get-purchases", function(ok, response) {
+          doneLoading();
+          if (ok) {
+            cacheKnownPurchases(response);
+            callback(ok, window.knownPurchases);
+          } else {
+            fetchEmail(function(email) {
+              if (!email) return callback(ok, window.knownPurchases);
+              window.store.get("knownPurchases"+email.replace(/[^A-z0-9]/g, "_"), function(ok, value) {
+                if (ok) {
+                  window.knownPurchases = JSON.parse(value);
+                }
+                callback(ok, window.knownPurchases);
+                publishPurchaseEvents(window.knownPurchases);
+              })
+            });
+          }
+        });
+      }
+    });
+  }
+
+  function mergeKnownPurchases(purchases) {
+    checkWebPurchases(function(ok, knownPurchases) {
+      if (knownPurchases) {
+        var productList = products.split(/ /);
+        for (i = 0; i < productList.length; i++) {
+          if (knownPurchases[productList[i]]) purchases[productList[i]] = knownPurchases[productList[i]];
+        }
+      }
+      callback("ok", purchases);
+      publishPurchaseEvents(purchases);
+    });
+  }
+
   var i;
   if (window.isIosApp) {
-    window.checkPurchaseCallback = function(purchases) {callback("ok",purchases); };
+    window.checkPurchaseCallback = mergeKnownPurchases;
     callIos("checkpurchase", products);
   } else if (window.isAndroidApp && !window.isNookAndroidApp) {
-    window.checkPurchaseCallback = function(purchases) {callback("ok",purchases); };
+    window.checkPurchaseCallback = mergeKnownPurchases;
     androidBilling.checkPurchase(products);
   } else if (window.isWinOldApp) {
     safeTimeout(function() {
       var purchases = eval(window.external.CheckPurchase(products));
       callback("ok",purchases);
+      publishPurchaseEvents(purchases);
     }, 0);
   } else if (window.isMacApp && window.macPurchase) {
     safeTimeout(function() {
       var purchases = JSON.parse(macPurchase.checkPurchases_(products));
       callback("ok",purchases);
+      publishPurchaseEvents(purchases);
     }, 0);
   } else if (window.isCef) {
     cefQuery({
       request:"CheckPurchases " + products,
       onSuccess: function(response) {
         console.log("cp response " + response);
-        callback("ok",JSON.parse(response));
+        var purchases = JSON.parse(response);
+        callback("ok",purchases);
+        publishPurchaseEvents(purchases);
       },
       onFailure: function(error_code, error_message) {
         console.error("CheckPurchases error: " + error_message);
@@ -975,21 +1085,18 @@ function checkPurchase(products, callback) {
       }
     });
   } else if (isWebPurchaseSupported()) {
-    isRegistered(function (registered) {
-      if (!registered) return callback("ok", {billingSupported: true});
-      if (window.knownPurchases) {
-        safeTimeout(function() { callback("ok", knownPurchases); }, 0);
-      } else {
-        getKnownPurchases(callback);
-      }
+    checkWebPurchases(function(ok, knownPurchases) {
+      callback(ok, knownPurchases);
+      publishPurchaseEvents(window.knownPurchases);
     });
   } else {
     var productList = products.split(/ /);
     var purchases = {};
     for (i = 0; i < productList.length; i++) {
-      purchases[productList[i]] = true;
+      purchases[productList[i]] = !!window.isChromeApp;
     }
     purchases.billingSupported = false;
+    publishPurchaseEvents(purchases);
     safeTimeout(function() {callback("ok", purchases);}, 0);
   }
 }
@@ -999,23 +1106,59 @@ function isWebPurchaseSupported() {
 }
 
 function isRestorePurchasesSupported() {
-  return !!window.isIosApp || isWebPurchaseSupported();
+  return !!window.isIosApp || !!window.isAndroidApp || isWebPurchaseSupported();
 }
 
-function restorePurchases(callback) {
+function restorePurchases(product, callback) {
+  function secondaryRestore(error) {
+    window.restoreCallback = null;
+    if (product) {
+      checkPurchase(product, function(ok, purchases) {
+        if (purchases[product]) {
+          callback();
+        } else {
+          clearScreen(function() {
+            var target = document.getElementById('text');
+            if (error) {
+              target.innerHTML="<p>Restore completed. Please try again later, or sign in to Choiceofgames.com to restore purchases.</p>";
+            } else {
+              target.innerHTML="<p>Restore completed. This product is not yet purchased. You may also sign in to Choiceofgames.com to restore purchases.</p>";
+            }
+            loginForm(document.getElementById('text'), /*optionality*/1, /*err*/null, function() {callback(); });
+          });
+        }
+      });
+    } else {
+      callback(error);
+    }
+  }
   if (window.isIosApp) {
-    window.restoreCallback = callback;
+    window.restoreCallback = secondaryRestore;
     callIos("restorepurchases");
+  } else if (window.isAndroidApp) {
+    window.restoreCallback = secondaryRestore;
+    androidBilling.forceRestoreTransactions();
   } else if (isWebPurchaseSupported()) {
     isRegistered(function(registered) {
-      var restoreCallback = function() {callback();};
       if (registered) {
-        getKnownPurchases(restoreCallback);
+        startLoading();
+        xhrAuthRequest("GET", "get-purchases", function(ok, response) {
+          doneLoading();
+          if (ok) {
+            cacheKnownPurchases(response);
+          } else {
+            if (response.error != "not registered") {
+              alertify.error("There was an error downloading your purchases from Choiceofgames.com. "+
+                "Please refresh this page to try again, or contact support@choiceofgames.com for assistance.", 15000);
+            }
+          }
+          callback(!ok);
+        });
       } else {
         clearScreen(function() {
           var target = document.getElementById('text');
           target.innerHTML="<p>Please sign in to Choiceofgames.com to restore purchases.</p>";
-          loginForm(document.getElementById('text'), /*optional*/1, /*err*/null, restoreCallback);
+          loginForm(document.getElementById('text'), /*optional*/1, /*err*/null, function() {callback();});
         });
       }
     });
@@ -1042,6 +1185,9 @@ function purchase(product, callback) {
   var purchaseCallback = function() {
     window.purchaseCallback = null;
     safeCall(null, callback);
+    if (window.purchaseSubscriptions && purchaseSubscriptions[product]) {
+      purchaseSubscriptions[product].call();
+    }
   };
   if (window.isIosApp) {
     window.purchaseCallback = purchaseCallback;
@@ -1057,78 +1203,156 @@ function purchase(product, callback) {
   } else if (window.isCef) {
     cefQuerySimple("Purchase " + product);
     // no callback; we'll refresh on purchase
+  } else if (window.isWeb && product == window.appPurchase) {
+    var webStoreFallback = function() {
+      window.appPurchase = null;
+      purchase(product, callback);
+    };
+    var clickLink = function(id) {
+      var link = document.getElementById(id);
+      if (!link) return webStoreFallback();
+      var href = link.getAttribute("href");
+      if (!href) return webStoreFallback();
+      window.location.href = href;
+    };
+    
+    // instead of IAP, send the user to a store
+    if (/(iPhone OS|iPad)/.test(navigator.userAgent)) {
+      if (/iPhone OS [456]_/.test(navigator.userAgent)) {
+        // ancient versions of iOS can't use our app
+        webStoreFallback();
+      } else {
+        clickLink("iphoneLink");
+      }
+    } else if (/Silk/.test(navigator.userAgent)) {
+      clickLink("kindleLink");
+    } else if (/Android/.test(navigator.userAgent)) {
+      clickLink("androidLink");
+    } else if (window.steamClobber && document.getElementById("steamLink")) {
+      clickLink("steamLink");
+    } else {
+      webStoreFallback();
+    }
   } else if (isWebPurchaseSupported()) {
     if (!window.StripeCheckout) return asyncAlert("Sorry, we weren't able to initiate payment. (Your "+
       "network connection may be down.) Please refresh the page and try again, or contact "+
       "support@choiceofgames.com for assistance.");
-    startLoading();
-    isRegistered(function(registered) {
-      doneLoading();
-      var fullProductName = window.storeName + "." + product;
-      function stripe(email) {
-        startLoading();
-        xhrAuthRequest("GET", "product-data", function(ok, data) {
-          doneLoading();
-          if (!ok) return asyncAlert("Sorry, we weren't able to initiate payment. (Your "+
-            "network connection may be down.) Please refresh the page and try again, or contact "+
-            "support@choiceofgames.com for assistance.");
-          data = data[fullProductName];
-          StripeCheckout.open({
-            key:         window.stripeKey,
-            address:     false,
-            amount:      data.amount,
-            name:        data.display_name,
-            email:       email,
-            panelLabel:  'Buy',
-            token:       function(response) {
-              clearScreen(function() {
-                startLoading();
-                xhrAuthRequest("POST", "purchase", function(ok, response) {
-                  doneLoading();
-                  if (ok) {
-                    cacheKnownPurchases(response);
-                    return callback();
-                  } else if (/^card error: /.test(response.error)) {
-                    var cardError = response.error.substring("card error: ".length);
-                    asyncAlert(cardError);
-                    clearScreen(loadAndRestoreGame);
-                  } else if ("purchase already in flight" == response.error) {
-                    asyncAlert("Sorry, there was an error handling your purchase. Please wait five minutes and try again, or contact support@choiceofgames.com for assistance.");
-                    clearScreen(loadAndRestoreGame);
-                  } else {
-                    asyncAlert("Sorry, there was an error processing your card. (Your "+
-                      "network connection may be down.) Please refresh the page and try again, or contact "+
-                      "support@choiceofgames.com for assistance.");
-                    clearScreen(loadAndRestoreGame);
-                  }
-                }, "stripeToken", response.id, "product", fullProductName, "key", window.stripeKey);
-              });
-            }
-          });
-        }, "products", fullProductName);
-      }
-      if (registered) return fetchEmail(stripe);
-      clearScreen(function() {
-        var target = document.getElementById('text');
-        target.innerHTML="<p>Please sign in to Choiceofgames.com to purchase.</p>";
-        loginForm(document.getElementById('text'), /*optional*/1, /*err*/null, function(registered){
-          if (registered) {
-            checkPurchase(product, function(ok, response) {
-              if (ok && response[product]) {
-                callback();
-              } else {
-                clearScreen(loadAndRestoreGame);
-                return fetchEmail(stripe);
-              }
+    var fullProductName = window.storeName + "." + product;
+    function stripe() {
+      if (window.productData && window.productData[product]) {
+        var data = productData[product];
+        return StripeCheckout.open({
+          key:         window.stripeKey,
+          address:     false,
+          amount:      data.amount,
+          name:        data.display_name,
+          email:       window.recordedEmail,
+          panelLabel:  'Buy',
+          token:       function(response) {
+            clearScreen(function() {
+              startLoading();
+              xhrAuthRequest("POST", "purchase", function(ok, response) {
+                doneLoading();
+                if (ok) {
+                  cacheKnownPurchases(response);
+                  return purchaseCallback();
+                } else if (/^card error: /.test(response.error)) {
+                  var cardError = response.error.substring("card error: ".length);
+                  asyncAlert(cardError);
+                  clearScreen(loadAndRestoreGame);
+                } else if ("purchase already in flight" == response.error) {
+                  asyncAlert("Sorry, there was an error handling your purchase. Please wait five minutes and try again, or contact support@choiceofgames.com for assistance.");
+                  clearScreen(loadAndRestoreGame);
+                } else {
+                  asyncAlert("Sorry, there was an error processing your card. (Your "+
+                    "network connection may be down.) Please refresh the page and try again, or contact "+
+                    "support@choiceofgames.com for assistance.");
+                  clearScreen(loadAndRestoreGame);
+                }
+              }, "stripeToken", response.id, "product", fullProductName, "key", window.stripeKey);
             });
-          } else {
-            clearScreen(loadAndRestoreGame);
           }
         });
+      } else {
+        return asyncAlert("Sorry, we weren't able to initiate payment. (Your "+
+          "network connection may be down.) Please refresh the page and try again, or contact "+
+          "support@choiceofgames.com for assistance.");
+      }
+    }
+    if (window.registered && window.recordedEmail) {
+      stripe();
+    }
+    clearScreen(function() {
+      var target = document.getElementById('text');
+      target.innerHTML="<p>Please sign in to Choiceofgames.com to purchase.</p>";
+      loginForm(document.getElementById('text'), /*optional*/1, /*err*/null, function(registered){
+        if (registered) {
+          if (window.knownPurchases && window.knownPurchases[product]) {
+            purchaseCallback();
+          } else {
+            clearScreen(loadAndRestoreGame);
+            return stripe();
+          }
+        } else {
+          clearScreen(loadAndRestoreGame);
+        }
       });
     });
   } else {
-    safeTimeout(callback, 0);
+    safeTimeout(purchaseCallback, 0);
+  }
+}
+
+function printDiscount(product, fullYear, oneBasedMonthNumber, dayOfMonth, line, options) {
+  if (window.updatedDiscountDates && updatedDiscountDates[product]) {
+    var udd = updatedDiscountDates[product];
+    fullYear = udd.fullYear;
+    oneBasedMonthNumber = udd.oneBasedMonthNumber;
+    dayOfMonth = udd.dayOfMonth;
+  }
+  var shortMonthString = shortMonthStrings[oneBasedMonthNumber];
+  var discountTimestamp = new Date(shortMonthString + " " + dayOfMonth + ", " + fullYear).getTime();
+  var discountEligible = new Date().getTime() < discountTimestamp;
+  var span;
+  span = document.createElement("span");
+  span.setAttribute("id", "discount_" + product);
+  printx(line, span);
+  span.innerHTML = span.innerHTML.replace("${choice_discount_ends}", "<span id=discountdate_"+product+">"+shortMonthString + " " + parseInt(dayOfMonth, 10) + "</span>") + " ";
+
+  if (!discountEligible) {
+    span.style.display = "none";
+  }
+
+  text.appendChild(span);
+}
+
+function rewriteDiscount(product, fullYear, oneBasedMonthNumber, dayOfMonth) {
+  if (!window.updatedDiscountDates) window.updatedDiscountDates = {};
+  window.updatedDiscountDates[product] = {fullYear:fullYear, oneBasedMonthNumber:oneBasedMonthNumber, dayOfMonth:dayOfMonth};
+  var span = document.getElementById("discount_"+product);
+  if (!span) return;
+  var shortMonthString = shortMonthStrings[oneBasedMonthNumber];
+  var discountTimestamp = new Date(shortMonthString + " " + dayOfMonth + ", " + fullYear).getTime();
+  var discountEligible = new Date().getTime() < discountTimestamp;
+  if (discountEligible) {
+    var dateSpan = document.getElementById("discountdate_"+product);
+    if (!dateSpan) return;
+    span.style.display = "";
+    dateSpan.innerHTML = shortMonthString + " " + parseInt(dayOfMonth, 10);
+  } else {
+    span.style.display = "none";
+  }
+}
+
+function handleDiscountResponse(ok, response) {
+  if (!ok || !response || !window.storeName || !response[storeName]) return;
+  if (!window.updatedDiscountDates) window.updatedDiscountDates = {};
+  var udds = response[storeName];
+  for (var product in udds) {
+    if (!udds.hasOwnProperty(product)) continue;
+    var udd = udds[product];
+    var result = udd.split("-");
+    rewriteDiscount(product, result[0], parseInt(result[1],10), parseInt(result[2], 10));
   }
 }
 
@@ -1280,7 +1504,7 @@ function showTicker(target, endTimeInSeconds, finishedCallback) {
   }
 
   function cleanUpTicker() {
-    window.tickerRunning = false;
+    window.blockRestart = false;
     if (window.isAndroidApp) {
       notificationBridge.cancelNotification();
     } else if (window.isIosApp) {
@@ -1299,16 +1523,19 @@ function showTicker(target, endTimeInSeconds, finishedCallback) {
       if (minutesRemaining < 60) {
         remainderSeconds = secondsRemaining - minutesRemaining * 60;
         return ""+minutesRemaining+"m " + formatSecondsRemaining(remainderSeconds);
-      } else {
+      } else if (minutesRemaining < 6000) {
         var hoursRemaining = Math.floor(secondsRemaining / 3600);
         remainderSeconds = secondsRemaining - hoursRemaining * 3600;
         return ""+hoursRemaining+"h " + formatSecondsRemaining(remainderSeconds, true);
+      } else {
+        var daysRemaining = Math.floor(secondsRemaining / 86400);
+        remainderSeconds = secondsRemaining - daysRemaining * 86400;
+        return ""+daysRemaining+" days " + formatSecondsRemaining(remainderSeconds, true);
       }
     }
   }
 
   function tick() {
-    window.tickerRunning = true;
     var tickerElement = document.getElementById("delayTicker");
     var tickerStillVisible = tickerElement && tickerElement.parentNode && tickerElement.parentNode.parentNode;
     if (!tickerStillVisible) {
@@ -1438,7 +1665,7 @@ function printInput(target, inputType, callback, minimum, maximum, step) {
 
 }
 
-function promptEmailAddress(target, defaultEmail, callback) {
+function promptEmailAddress(target, defaultEmail, allowContinue, callback) {
   if (!target) target = document.getElementById('text');
   var form = document.createElement("form");
   var self = this;
@@ -1462,9 +1689,11 @@ function promptEmailAddress(target, defaultEmail, callback) {
   println("", form);
   printButton("Next", form, true);
 
-  printButton("No, Thanks", target, false, function() {
-    callback(true);
-  });
+  if (allowContinue) {
+    printButton("No, Thanks", target, false, function() {
+      callback(true);
+    });
+  }
 
   form.onsubmit = function(e) {
     preventDefault(e);
@@ -1636,14 +1865,27 @@ function loginForm(target, optional, errorMessage, callback) {
         }
         if ("google" == choice) {
           if (!window.gapi) return asyncAlert("Sorry, we weren't able to sign you in with Google. (Your network connection may be down.) Please try again later, or contact support@choiceofgames.com for assistance.");
-          googleLoginCallbackCallback = function(ok) {
-            if (ok) {
-              return safeCall(null, function() {callback("ok")});
+          var done = false;
+          return gapi.auth.signIn({callback: function (authResult) {
+            if (done) return;
+            done = true;
+            if (authResult['status']['signed_in']) {
+              isRegistered(function(registered) {
+                if (!registered) xhrAuthRequest("POST", "google-login", function(ok, response){
+                  loginDiv(ok, response.email);
+                  recordLogin(ok, response.email);
+                  cacheKnownPurchases(response.purchases);
+                  if (ok) {
+                    callback("ok");
+                  } else {
+                    asyncAlert("Sorry, we weren't able to sign you in with Google. Please try again later, or contact support@choiceofgames.com for assistance.");
+                  }
+                }, "code", authResult['code'], "client_id", googleAppId);
+              });
             } else {
               asyncAlert("Sorry, we weren't able to sign you in with Google. Please try again later, or contact support@choiceofgames.com for assistance.");
             }
-          }
-          return gapi.auth.signIn();
+          }});
         }
         if (!/^\S+@\S+\.\S+$/.test(email) && "no" != choice) {
           showMessage('Sorry, "'+email+'" is not an email address.  Please type your email address again.');
@@ -1692,7 +1934,10 @@ function loginForm(target, optional, errorMessage, callback) {
                     loginDiv(ok, email);
                     recordLogin(ok, email);
                     cacheKnownPurchases(response.purchases);
-                    safeCall(null, function() {callback("ok");});
+                    // we need another click event so we can launch Stripe in a pop-up
+                    asyncAlert("You have registered successfully.", function() {
+                      safeCall(null, function() {callback("ok");});
+                    })
                   } else if ("incorrect password" == response.error) {
                     target.innerHTML = "";
                     loginForm(target, optional, 'Sorry, the email address "'+email+'" is already in use. Please type your password below, or use a different email address.', callback);
@@ -1722,7 +1967,10 @@ function loginForm(target, optional, errorMessage, callback) {
                   loginDiv(ok, email);
                   recordLogin(ok, email);
                   cacheKnownPurchases(response.purchases);
-                  safeCall(null, function() {callback("ok");});
+                  // we need another click event so we can launch Stripe in a pop-up
+                  asyncAlert("You have registered successfully.", function() {
+                    safeCall(null, function() {callback("ok");});
+                  })
                 } else if ("unknown email" == response.error) {
                   showMessage('Sorry, we can\'t find a record for the email address "'+email+'". Please try a different email address, or create a new account.');
                 } else if ("incorrect password" == response.error) {
@@ -1805,7 +2053,7 @@ function isRegistered(callback) {
 }
 
 function isRegisterAllowed() {
-  return window.isWeb || window.isIosApp;
+  return window.isWeb || window.isIosApp || window.isAndroidApp;
 }
 
 function preventDefault(event) {
@@ -1833,19 +2081,6 @@ function getPassword(target, code) {
   printButton("Cancel", target, false, function() {
     code(true);
   });
-}
-
-function facebookStatusChangeCallback(response) {
-  if (response.status == "connected") {
-    isRegistered(function(registered) {
-      if (!registered) xhrAuthRequest("POST", "facebook-login", function(ok, response){
-        loginDiv(ok, response.email);
-        cacheKnownPurchases(response.purchases);
-        recordLogin(ok, response.email);
-        if (ok) clearScreen(loadAndRestoreGame);
-      }, "app_id", facebookAppId);
-    });
-  }
 }
 
 function showPassword(target, password) {
@@ -1941,25 +2176,6 @@ function reportBug() {
   });
 }
 
-window.isWebOS = /webOS/.test(navigator.userAgent);
-window.isMobile = isWebOS || /Mobile/.test(navigator.userAgent);
-window.isFile = /^file:/.test(window.location.href);
-window.isXul = /^chrome:/.test(window.location.href);
-window.isWinOldApp = false;
-try {
-  isWinOldApp = window.external.IsWinOldApp();
-} catch (ignored) {}
-window.isWeb = !isWinOldApp && /^https?:/.test(window.location.href);
-window.isAndroid = /Android/.test(navigator.userAgent);
-window.isSecureWeb = /^https:?$/.test(window.location.protocol);
-window.isSafari = /Safari/.test(navigator.userAgent);
-window.isIE = /(MSIE|Trident)/.test(navigator.userAgent);
-window.isIPad = /iPad/.test(navigator.userAgent);
-window.isKindleFire = /Kindle Fire/.test(navigator.userAgent);
-window.isWinStoreApp = "ms-appx:" == window.location.protocol;
-window.isCef = !!window.cefQuery;
-
-window.loadTime = new Date().getTime();
 window.registered = false;
 
 function getSupportEmail() {
@@ -2038,6 +2254,9 @@ window.onerror=function(msg, file, line, stack) {
         body += "\nLoad time: " + window.loadTime;
         if (window.Persist) body += "\nPersist: " + window.Persist.type;
         body += "\n\n" + statMsg + "\n\nversion=" + window.version;
+        if (window.currentVersion) {
+          body += "\ncurrentVersion=" + window.currentVersion;
+        }
         var supportEmailHref = "mailto:support-external@choiceofgames.com";
         try {
           supportEmailHref="mailto:"+getSupportEmail();
@@ -2077,8 +2296,23 @@ window.onload=function() {
       } else if (map.achievements) {
         doneLoading();
         showAchievements("hideNextButton");
-      } else {
+      } else if (map.forcedScene) {
         safeCall(null, function() {loadAndRestoreGame(window.slot, window.forcedScene);});
+      } else if (map.persistence) {
+        var persistenceParts = map.persistence.split("|");
+        if (persistenceParts.length == 2) {
+          window.storeName = persistenceParts[0];
+          window.remoteStoreName = persistenceParts[1];
+        } else {
+          window.storeName = map.persistence;
+        }
+        var startupScene = new Scene("startup", window.stats, window.nav, {secondaryMode:"startup", saveSlot:"startup"});
+        startupScene.startupCallback = function() {
+          safeCall(null, loadAndRestoreGame);
+        }
+        startupScene.execute();
+      } else {
+        safeCall(null, loadAndRestoreGame);
       }
     } else {
       safeCall(null, loadAndRestoreGame);
@@ -2104,7 +2338,7 @@ window.onload=function() {
             };
         }
     }
-    if (window.isCef) {
+    if (window.isCef || window.isNode) {
       var buttons = document.getElementById("buttons");
       buttons.appendChild(document.createTextNode(" "));
       var menuButton = document.createElement("button");
@@ -2126,7 +2360,7 @@ window.onload=function() {
       ' scrolling="no" frameborder="0" style="border:none; overflow:hidden; width:90px; height:20px;" allowTransparency="true"></iframe>'+
       '<iframe allowtransparency="true" frameborder="0" scrolling="no" '+
       'src="//platform.twitter.com/widgets/follow_button.html?screen_name=choiceofgames&amp;show_screen_name=false"'+
-      ' style="width:150px; height:20px;"></iframe>';
+      ' style="width:160px; height:20px;"></iframe>';
     }
     var supportEmailLink = document.getElementById("supportEmail");
     if (window.storeName && supportEmailLink) {
@@ -2134,9 +2368,25 @@ window.onload=function() {
     }
 
     submitAnyDirtySaves();
-};
 
-_global = this;
+    if (window.purchaseSubscriptions) {
+      var productList = "";
+      for (var key in purchaseSubscriptions) {
+        productList += (productList ? " " : "") + key;
+      }
+      if (productList) checkPurchase(productList, function() {});
+    }
+    if (window.isWeb && window.appPurchase) {
+      (function() {
+        var fullProductName = window.storeName + "." + appPurchase;
+        xhrAuthRequest("GET", "product-data", function(ok, data) {
+          if (!window.productData) window.productData = {};
+          window.productData[appPurchase] = data[fullProductName];
+        }, "products", fullProductName);
+      })();
+    }
+
+};
 
 if ( document.addEventListener ) {
   document.addEventListener( "DOMContentLoaded", window.onload, false );
@@ -2150,8 +2400,11 @@ try {
 } catch (e) {}
 
 if (window.isWeb) {
-  document.write("<style>.webOnly { display: block !important; }</style>\n"+
-    "<scr"+"ipt src='https://checkout.stripe.com/v2/checkout.js'></scr"+"ipt>");
+  document.write("<style>.webOnly { display: block !important; }</style>\n");
+  var checkoutScript = document.createElement("script");
+  checkoutScript.async = 1;
+  checkoutScript.src="https://checkout.stripe.com/v2/checkout.js";
+  document.getElementsByTagName("head")[0].appendChild(checkoutScript);
 
   var metas = document.getElementsByTagName("meta");
   var facebookAppId, googleAppId;
@@ -2160,7 +2413,6 @@ if (window.isWeb) {
     var meta = metas[i];
     if ("fb:app_id" == meta.getAttribute("property")) {
       facebookAppId = meta.getAttribute("content");
-      break;
     } else if ("google-signin-clientid" == meta.getAttribute("name")) {
       googleAppId = meta.getAttribute("content");
     }
@@ -2174,10 +2426,6 @@ if (window.isWeb) {
                             // the session
         xfbml      : true,  // parse social plugins on this page
         version    : 'v2.0' // use version 2.0
-      });
-
-      FB.getLoginStatus(function(response) {
-        facebookStatusChangeCallback(response);
       });
     };
 
@@ -2197,7 +2445,7 @@ if (window.isWeb) {
   })();
   
 }
-if (!isWeb && window.isIosApp) {
+if (!window.isWeb && window.isIosApp) {
   document.write("<style>"+
   "#header { display: none; }"+
   ""+
@@ -2216,6 +2464,18 @@ if (!isWeb && window.isIosApp) {
       document.body.appendChild(dummy);
       window.setTimeout(function() {document.body.removeChild(dummy);}, 10);
     }, false);
+  callIos("checkdiscounts");
+  // in a timeout because iOS may try to add to the head before mygame.js has run
+  (function(){
+    var requester = function() {
+      if (window.stats) {
+        callIos("requestscenes");
+      } else {
+        safeTimeout(requester, 1);
+      }
+    }
+    safeTimeout(requester, 0);
+  })();
 } else if (window.isAndroidApp) {
   document.write("<style>"+
   "#header { display: none; }"+
@@ -2226,7 +2486,7 @@ if (!isWeb && window.isIosApp) {
   "</style>");
 }
 if (window.isWebOS) document.write("<style>body {font-family: Prelude; font-size: 14pt}\n#header {font-size: 13pt}</style>");
-if (window.isMacApp || window.isWinOldApp || window.isCef || window.isAndroidApp) {
+if (window.isMacApp || window.isWinOldApp || window.isCef || window.isAndroidApp || window.isNode) {
   document.write("<style>"+
     "#headerLinks { display: none; }"+
     ""+
@@ -2234,7 +2494,7 @@ if (window.isMacApp || window.isWinOldApp || window.isCef || window.isAndroidApp
     ""+
     "</style>");
 }
-if (isWeb && !window.Touch) {
+if (window.isWeb && !window.Touch) {
   document.write("<style>label:hover {background-color: #E4DED8;}</style>");
 }
 if (window.isChromeApp) {
@@ -2354,7 +2614,7 @@ if (window.isWinStoreApp) {
     uiScript = document.createElement("script");
     uiScript.src = "//Microsoft.WinJS.1.0/js/ui.js";
     document.head.appendChild(uiScript);
-} else if (isWinOldApp) {
+} else if (window.isWinOldApp) {
     console = {
         log: function (message) { window.external.ConsoleLog(message); },
         error: function (message) { window.external.ConsoleError(message); }
@@ -2370,25 +2630,17 @@ function platformCode() {
   if (window.isWinOldApp) return "csharp";
   if (window.isChromeApp) return "chrome";
   if (window.isWebOS) return "palm";
+  if (window.isSteamApp) return "steam";
   if (window.isCef) return "cef";
+  if (window.isNode) return "dl";
   if (window.isWeb) return "web";
   return "unknown";
 }
 
-function googleLoginCallback(authResult) {
-  var callback = googleLoginCallbackCallback;
-  googleLoginCallbackCallback = null;
-  if (!callback) callback = function(ok) { if (ok) clearScreen(loadAndRestoreGame); };
-  if (authResult['status']['signed_in']) {
-    isRegistered(function(registered) {
-      if (!registered) xhrAuthRequest("POST", "google-login", function(ok, response){
-        loginDiv(ok, response.email);
-        recordLogin(ok, response.email);
-        cacheKnownPurchases(response.purchases);
-        callback("ok");
-      }, "code", authResult['code'], "client_id", googleAppId);
-    });
-  } else {
-    callback(!"ok");
+function reinjectNavigator() {
+  if (window.stats && window.stats.scene && window.stats.scene.nav) {
+    var scene = window.stats.scene;
+    scene.nav = window.nav;
+    nav.repairStats(scene.stats);
   }
 }
