@@ -1,4 +1,5 @@
 <?php
+session_set_cookie_params(0, '/', '.dashingdon.com');
 session_start();
 require_once($_SERVER['DOCUMENT_ROOT'].'/ink/base.php');
 
@@ -38,6 +39,29 @@ $newid = R::store( $book );
 
 $_SESSION['memberlog']=$newid;
 $_SESSION['nick']=$nickname;
+
+
+
+$structure = "play/$nickname";
+$gamebase = "./play/$nickname/";
+$thisbase = "./play/_assets/";
+
+if (!mkdir($structure, 0777, true)) {
+	die('Failed to create folders...');
+}
+
+$thesefiles = array('index.php');
+
+foreach($thesefiles as $file){
+	$newfile = $gamebase.$file;
+	$file = $thisbase.$file;
+	if (!copy($file, $newfile)) {
+		echo "failed to copy $file...\n";
+	}
+}
+
+
+
 $_SESSION['logger']='jackedin';
 header('Location: index.php');
 exit();
